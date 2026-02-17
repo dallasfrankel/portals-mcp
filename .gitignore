@@ -1,5 +1,6 @@
 # Environment
 .env
+mcp-config.json
 
 # macOS
 .DS_Store
