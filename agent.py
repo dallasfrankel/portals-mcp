@@ -1,8 +1,8 @@
 """
-Portals Game Designer Agent — powered by a local Ollama model.
+Portals Game Designer Agent — powered by OpenRouter.
 
-Connects to the portals-mcp server via MCP and uses Ollama for the LLM brain.
-Run: python agent.py [--model MODEL] [--vision-model MODEL] [--ollama-host HOST]
+Connects to the portals-mcp server via MCP and uses OpenRouter for the LLM brain.
+Run: python agent.py [--model MODEL] [--vision-model MODEL] [--api-key KEY]
 """
 
 import argparse
@@ -15,16 +15,19 @@ import subprocess
 import sys
 from pathlib import Path
 
-import ollama
+from dotenv import load_dotenv
+from openai import OpenAI
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+
+load_dotenv()
 
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
-DEFAULT_MODEL = "qwen2.5-coder:7b"
-DEFAULT_VISION_MODEL = "llava:7b"
-DEFAULT_OLLAMA_HOST = "http://localhost:11434"
+DEFAULT_MODEL = "qwen/qwen3-coder-next"
+DEFAULT_VISION_MODEL = "meta-llama/llama-3.2-11b-vision-instruct"
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 SYSTEM_PROMPT_PATH = Path(__file__).parent / "agent_prompt.md"
 
 
@@ -39,8 +42,8 @@ def load_system_prompt() -> str:
     return "You are a helpful assistant for building 3D games in Portals."
 
 
-def mcp_schema_to_ollama_tool(tool) -> dict:
-    """Convert an MCP tool definition to an Ollama tool-calling dict."""
+def mcp_schema_to_openai_tool(tool) -> dict:
+    """Convert an MCP tool definition to an OpenAI tool-calling dict."""
     input_schema = tool.inputSchema if tool.inputSchema else {"type": "object", "properties": {}}
     return {
         "type": "function",
@@ -322,7 +325,7 @@ PROJECT_DIR = Path(__file__).parent.resolve()
 
 # Set at startup from CLI args — used by describe_image
 _vision_model: str = DEFAULT_VISION_MODEL
-_ollama_client: ollama.Client | None = None
+_openai_client: OpenAI | None = None
 # Last room data file path returned by get_room_data — used to fix placeholder paths
 _last_room_file_path: str = ""
 
@@ -416,20 +419,8 @@ def execute_builtin_tool(name: str, args: dict) -> str:
             suffix = fp.suffix.lower()
             if suffix not in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
                 return f"Error: unsupported image format: {suffix}"
-            if _ollama_client is None:
-                return "Error: Ollama client not initialised"
-            # Check vision model is available
-            try:
-                available = [m.model for m in _ollama_client.list().models]
-                if _vision_model not in available:
-                    return (
-                        f"Vision model '{_vision_model}' is not installed.\n"
-                        f"Run: ollama pull {_vision_model}\n"
-                        f"Or choose a different model with --vision-model.\n"
-                        f"Installed models: {', '.join(available)}"
-                    )
-            except Exception as e:
-                return f"Error checking Ollama models: {e}"
+            if _openai_client is None:
+                return "Error: OpenAI client not initialised"
             prompt = args.get("prompt") or (
                 "This is a 4-view thumbnail of a 3D model. "
                 "Describe what the object is, its shape, colour, and any notable features. "
@@ -437,15 +428,17 @@ def execute_builtin_tool(name: str, args: dict) -> str:
             )
             img_b64 = base64.b64encode(fp.read_bytes()).decode()
             try:
-                resp = _ollama_client.chat(
+                resp = _openai_client.chat.completions.create(
                     model=_vision_model,
                     messages=[{
                         "role": "user",
-                        "content": prompt,
-                        "images": [img_b64],
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}},
+                        ],
                     }],
                 )
-                return resp.message.content or "(no description returned)"
+                return resp.choices[0].message.content or "(no description returned)"
             except Exception as e:
                 return f"Error calling vision model '{_vision_model}': {e}"
 
@@ -547,13 +540,13 @@ def execute_builtin_tool(name: str, args: dict) -> str:
 # Agent loop
 # ---------------------------------------------------------------------------
 
-async def agent_loop(model: str, vision_model: str, ollama_host: str, num_ctx: int) -> None:
-    global _vision_model, _ollama_client, _last_room_file_path
+async def agent_loop(model: str, vision_model: str, api_key: str) -> None:
+    global _vision_model, _openai_client, _last_room_file_path
 
     system_prompt = load_system_prompt()
     print(f"Loaded system prompt ({len(system_prompt)} chars)")
 
-    _ollama_client = ollama.Client(host=ollama_host)
+    _openai_client = OpenAI(base_url=OPENROUTER_BASE_URL, api_key=api_key)
     _vision_model = vision_model
 
     # --- Connect to MCP server via stdio ---
@@ -572,12 +565,12 @@ async def agent_loop(model: str, vision_model: str, ollama_host: str, num_ctx: i
             # Discover MCP tools and merge with built-in tools
             tools_result = await session.list_tools()
             mcp_tools = tools_result.tools
-            ollama_tools = [mcp_schema_to_ollama_tool(t) for t in mcp_tools] + BUILTIN_TOOLS
+            openai_tools = [mcp_schema_to_openai_tool(t) for t in mcp_tools] + BUILTIN_TOOLS
             mcp_tool_names = {t.name for t in mcp_tools}
             tool_names = [t.name for t in mcp_tools] + list(BUILTIN_TOOL_NAMES)
 
-            print(f"Connected! {len(ollama_tools)} tools available: {', '.join(tool_names)}")
-            print(f"Model: {model}  |  Vision: {vision_model}  |  Context: {num_ctx:,} tokens")
+            print(f"Connected! {len(openai_tools)} tools available: {', '.join(tool_names)}")
+            print(f"Model: {model}  |  Vision: {vision_model}")
             print("Type your message (or 'quit' to exit).\n")
 
             # Conversation history
@@ -585,7 +578,7 @@ async def agent_loop(model: str, vision_model: str, ollama_host: str, num_ctx: i
                 {"role": "system", "content": system_prompt},
             ]
 
-            client = _ollama_client
+            client = _openai_client
 
             while True:
                 # --- User input ---
@@ -606,15 +599,14 @@ async def agent_loop(model: str, vision_model: str, ollama_host: str, num_ctx: i
                 # --- LLM turn (may loop for tool calls) ---
                 while True:
                     print("\033[90m  (thinking...)\033[0m", end="\r", flush=True)
-                    response = client.chat(
+                    response = client.chat.completions.create(
                         model=model,
                         messages=messages,
-                        tools=ollama_tools,
-                        options={"num_ctx": num_ctx},
+                        tools=openai_tools,
                     )
                     print("                 ", end="\r", flush=True)  # clear thinking indicator
 
-                    msg = response.message
+                    msg = response.choices[0].message
 
                     # Collect tool calls — native or parsed from text
                     calls_to_run: list[dict] = []
@@ -623,7 +615,8 @@ async def agent_loop(model: str, vision_model: str, ollama_host: str, num_ctx: i
                         for tc in msg.tool_calls:
                             calls_to_run.append({
                                 "name": tc.function.name,
-                                "arguments": tc.function.arguments or {},
+                                "arguments": json.loads(tc.function.arguments or "{}"),
+                                "id": tc.id,
                             })
                     elif msg.content:
                         # Fallback: model may have written the call as text
@@ -632,14 +625,30 @@ async def agent_loop(model: str, vision_model: str, ollama_host: str, num_ctx: i
                             calls_to_run.append(parsed)
 
                     if calls_to_run:
-                        # Append the assistant message
-                        messages.append(msg.model_dump() if msg.tool_calls else {
-                            "role": "assistant", "content": msg.content or "",
-                        })
+                        # Append the assistant message (preserve tool_calls for OpenAI history)
+                        if msg.tool_calls:
+                            messages.append({
+                                "role": "assistant",
+                                "content": msg.content,
+                                "tool_calls": [
+                                    {
+                                        "id": tc.id,
+                                        "type": "function",
+                                        "function": {
+                                            "name": tc.function.name,
+                                            "arguments": tc.function.arguments,
+                                        },
+                                    }
+                                    for tc in msg.tool_calls
+                                ],
+                            })
+                        else:
+                            messages.append({"role": "assistant", "content": msg.content or ""})
 
                         for call in calls_to_run:
                             fn_name = call["name"]
                             fn_args = call["arguments"]
+                            fn_id = call.get("id", "")
 
                             print_tool_call(fn_name, fn_args)
 
@@ -687,11 +696,11 @@ async def agent_loop(model: str, vision_model: str, ollama_host: str, num_ctx: i
 
                             print_tool_result(result_text)
 
-                            # Feed tool result back to model
-                            messages.append({
-                                "role": "tool",
-                                "content": result_text,
-                            })
+                            # Feed tool result back to model — OpenAI requires tool_call_id
+                            tool_result: dict = {"role": "tool", "content": result_text}
+                            if fn_id:
+                                tool_result["tool_call_id"] = fn_id
+                            messages.append(tool_result)
 
                         # Loop back so the model can process tool results
                         continue
@@ -708,27 +717,27 @@ async def agent_loop(model: str, vision_model: str, ollama_host: str, num_ctx: i
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Portals Game Designer Agent (Ollama)")
+    parser = argparse.ArgumentParser(description="Portals Game Designer Agent (OpenRouter)")
     parser.add_argument(
         "--model", default=DEFAULT_MODEL,
-        help=f"Ollama model name (default: {DEFAULT_MODEL})",
+        help=f"OpenRouter model name (default: {DEFAULT_MODEL})",
     )
     parser.add_argument(
         "--vision-model", default=DEFAULT_VISION_MODEL,
-        help=f"Ollama vision model for image description (default: {DEFAULT_VISION_MODEL})",
+        help=f"OpenRouter vision model for image description (default: {DEFAULT_VISION_MODEL})",
     )
     parser.add_argument(
-        "--ollama-host", default=DEFAULT_OLLAMA_HOST,
-        help=f"Ollama server URL (default: {DEFAULT_OLLAMA_HOST})",
-    )
-    parser.add_argument(
-        "--ctx", type=int, default=32768,
-        help="Context window size in tokens (default: 32768). Set to 131072 for 128K models.",
+        "--api-key", default=os.environ.get("OPENROUTER_API_KEY", ""),
+        help="OpenRouter API key (or set OPENROUTER_API_KEY env var)",
     )
     args = parser.parse_args()
 
+    if not args.api_key:
+        print("Error: OpenRouter API key required. Set OPENROUTER_API_KEY env var or pass --api-key.")
+        sys.exit(1)
+
     try:
-        asyncio.run(agent_loop(args.model, args.vision_model, args.ollama_host, args.ctx))
+        asyncio.run(agent_loop(args.model, args.vision_model, args.api_key))
     except KeyboardInterrupt:
         print("\nBye!")
 
