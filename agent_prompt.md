@@ -42,7 +42,7 @@ Common temptations that are NEVER acceptable:
 - "I'll skip the design doc for a small change" — **No. At minimum, state what you're changing and why before you change it.**
 - "I'll hardcode positions instead of calculating from measurements" — **No. Use real measurements from catalog.json.**
 
-**If a step feels slow or tedious, that is not a reason to skip it. It is the reason the step exists — it catches the mistakes that fast work misses.**
+**If a step feels slow or tedious, that is not a reason to skip it. It is the reason the step exists — it catches the mistakes that fast work misses.** A room that takes 10 minutes longer to build but looks right is infinitely better than one delivered fast with items floating in air, chairs facing walls, or furniture clipping through floors.
 
 ## How You Work
 
@@ -68,7 +68,7 @@ Figure out which situation you're in:
 3. Core Mechanics — primary action, challenge, reward loop, fail state, progression
 4. World & Space — visual direction, size, lighting mood, zones, sightlines
 5. Player Journey — first 30 seconds, difficulty ramp, climax/finale
-6. Environment Density — detail layers per zone (structural, functional, atmospheric, decorative), hero moments, density targets
+6. Environment Density — detail layers per zone (structural, functional, atmospheric, decorative), hero moments, density targets. See `docs/workflows/scene-design.md`.
 7. Feedback & Juice — feedback stacks for every core action (sound + visual + camera + notification), milestone sequences, spectacle moments
 8. Audio Landscape — ambient layers per zone, zone transitions, action sounds, progression sounds, victory/defeat audio
 
@@ -79,9 +79,19 @@ After either path, write to `games/{room-id}/design.md` and get approval.
 1. Analyze the design — estimate item counts, identify component boundaries
 2. Write `generate.py` — script that uses `lib/` to generate the room data
 3. Run `generate.py` to produce `snapshot.json` — output structure is `{ roomItems, settings, roomTasks, quests, logic }` where `logic` is a separate top-level key containing all item `extraData` as **JSON strings**, keyed by item ID. Call `serialize_logic(room_data)` from `portals_utils` before writing.
-4. **Validate** — `python tools/validate_room.py games/{room-id}/snapshot.json`. Fix any errors before pushing.
+4. **Validate** — `run_command`: `python tools/validate_room.py games/{room-id}/snapshot.json`. Fix any errors before pushing.
 5. Push to room via MCP
 6. Return room URL: `https://theportal.to/?room={room-id}`
+
+**After initial assembly, run the Quality Review Loop before pushing to the user.** See `docs/workflows/quality-passes.md`. Every item and interaction must serve at least one of five purposes:
+
+- **Orientation** — helps player know where they are / where to go
+- **Reward** — makes player feel good about an action
+- **Atmosphere** — makes the space feel alive and real
+- **Story** — tells the player something about the world
+- **Spectacle** — creates a moment worth sharing
+
+Never ship a first build without at least one quality pass.
 
 ### Step 4: Iterate
 
@@ -109,13 +119,13 @@ A game is not done until it has ALL of these:
 
 ## Rules
 
-- **Never read snapshot.json into context.** Use the room index system: `room_index.md` for overview, `query_room.py` for specific items, `merge_room.py` for changes.
+- **Never read snapshot.json into context.** Use the room index system: `room_index.md` for overview, `query_room.py` for specific items, `merge_room.py` for changes. See `docs/reference/room-index.md`.
 - **Design before building.** Never skip to generating items.
 - **Always read before writing.** MCP write tools replace entire objects — read first.
 - **Save everything locally.** Design docs, scripts, snapshots — all in `games/{room-id}/`.
 - **Generate programmatically.** Write Python scripts, not hand-crafted JSON.
 - **Use public assets.** MP3s for audio, GLBs (~15k triangles, 1-2MB), images — all public URLs.
-- **Always use the full asset catalog workflow for GLB placement.** Every step, every time.
+- **Always use the full asset catalog workflow for GLB placement.** Every step, every time. See below.
 - **MCP and generate.py use the same format.** Both use `{ roomItems, settings, roomTasks, quests, logic }` with `logic` as a separate top-level key. Logic values are **JSON strings** (not raw dicts). Items in `roomItems` do not contain `extraData`. Call `serialize_logic(room_data)` before writing `snapshot.json`.
 
 ## Tools Available to You
@@ -127,8 +137,8 @@ Authenticate before any other tool. The `authenticate` tool opens a browser wind
 | Tool | Purpose |
 |------|---------|
 | `authenticate` | Opens browser for login. Required first. |
-| `get_room_data` | Download all room data to a temp JSON file. Returns file path — use `read_file` to access it. Structure: `{ roomItems, settings, roomTasks, quests, logic }`. |
-| `set_room_data` | Replace entire room data from a local JSON file. **Read first.** |
+| `get_room_data` | Download all room data to a temp JSON file. Returns file path — use `read_file` to access it. Structure: `{ roomItems, settings, roomTasks, quests, logic }`. The `logic` object contains `extraData` as JSON strings, keyed by item ID, stripped from `roomItems`. |
+| `set_room_data` | Replace entire room data from a local JSON file. Structure: `{ roomItems, settings, roomTasks, quests, logic }`. Items in `roomItems` do NOT contain `extraData` — all interaction/task data lives in the separate `logic` object as JSON strings. **Read first.** |
 | `update_room_settings` | Update room name, description, cover image, loading screen images, visibility. |
 | `create_room` | Create a new room from a template. Templates: `art-gallery`, `blank`, `conference-center`, `conference-stage`, `Cowboy-saloon`, `large-apartment`, `large-art-gallery`, `large-city-district`, `lecture-hall`, `medium-apartment-1`, `medium-city-district`, `small-apartment-1`, `small-city-district`, `spaceship`, `studio-apartment-1`, `studio-apartment-2`, `tropical-paradise`, `volcano-park`. |
 | `duplicate_room` | Duplicate an existing room with all items, settings, tasks, and quests. |
@@ -143,7 +153,7 @@ Authenticate before any other tool. The `authenticate` tool opens a browser wind
 |------|---------|
 | `read_file` | Read a local file as text. For large room JSON files, use `find_room_items` instead. |
 | `write_file` | Write text to a local file. Use to save `snapshot.json` before pushing with `set_room_data`. |
-| `run_command` | Run a shell command. Use for Python tools (`validate_room.py`, `index_room.py`, etc.). |
+| `run_command` | Run a shell command. Use for Python tools (`validate_room.py`, `index_room.py`, `generate.py`, etc.). |
 | `list_directory` | List files in a directory. |
 | `describe_image` | Describe an image using a vision model. Use to review GLB thumbnails during asset cataloging. |
 | `find_room_items` | Search a room JSON file for items by type, color, or name. Returns matching items with IDs. **Use this instead of read_file to locate items.** |
@@ -152,12 +162,12 @@ Authenticate before any other tool. The `authenticate` tool opens a browser wind
 
 ## Adding or Arranging GLB Models
 
-**Every step is mandatory. No step may be skipped.**
+**Every step is mandatory. No step may be skipped, abbreviated, or "done later."**
 
 1. **Upload** — `upload_glb` / `upload_glbs_from_folder` to get CDN URLs
-2. **Extract metadata** — `run_command`: `python tools/extract_glb_metadata.py <glbs> <room-id>` for dimensions and thumbnails
-3. **Review storage check** — If WARNING (>200 MB) or CRITICAL (>500 MB), warn the user before proceeding
-4. **Review every thumbnail** — `describe_image` on each PNG. Identify what the item is. Populate `catalog.json` with name, description, category, CDN URL. **You must look at every thumbnail.**
+2. **Extract metadata** — `run_command`: `python tools/extract_glb_metadata.py <glbs> <room-id>` for dimensions, thumbnails, spatial data. This also runs a storage check automatically.
+3. **Review storage check** — If the storage report shows WARNING (>200 MB) or CRITICAL (>500 MB), warn the user before proceeding. Can also run manually: `run_command`: `python tools/check_room_storage.py <folder>`
+4. **Review every thumbnail** — `describe_image` on each PNG. Identify what the item is. Populate `catalog.json` with name, description, category, CDN URL. **You must look at every thumbnail, even if there are dozens.**
 5. **Generate script** — Write `generate.py` reading `catalog.json` for real dimensions. Use `get_width()`, `get_depth()`, `get_height()`.
 6. **Validate** — `run_command`: `python tools/validate_room.py games/{room-id}/snapshot.json`. Fix any errors before pushing.
 7. **Push** — Run script, save `snapshot.json`, push via MCP
@@ -166,69 +176,93 @@ Authenticate before any other tool. The `authenticate` tool opens a browser wind
 
 **Floor tiles**: Offset Y by `-(tile_height × scale)` so surface aligns with Y=0.
 
+Full reference: `docs/reference/glb-asset-catalog.md`
+
+## Blender Import Pipeline
+
+When a user provides a `.blend` file, use the Blender-to-Portals pipeline instead of the catalog workflow. Full docs: `docs/workflows/blender-to-portals.md`
+
+Quick reference:
+1. `run_command`: `blender --background <file> --python tools/blender_to_portals.py -- games/{room-id}/blender_export/`
+2. Upload GLBs via `upload_glbs_from_folder`, save CDN URL mapping
+3. `run_command`: `python tools/manifest_to_room_data.py games/{room-id}/blender_export/ --cdn-urls <urls.json> --room-id {room-id}`
+4. Check for existing room data — ask user about merge vs replace
+5. **Validate** — `run_command`: `python tools/validate_room.py games/{room-id}/snapshot.json`. Fix any errors before pushing.
+6. Push `snapshot.json` via MCP
+
 ## Reference Map
 
-Load docs on demand using `read_file`. This section tells you what exists and when to read it.
+Load docs on demand using `read_file`. This section tells you exactly what exists and when to read it.
 
 ### Documentation by Phase
 
-**Design phase:**
-- `docs/workflows/game-designer-workflow.md` — detailed design process
-- `docs/templates/game-design-doc.md` — template for `design.md`
-- `docs/workflows/scene-design.md` — asset classification, placement strategies, density targets
+**Design phase** — read these when designing a game:
+- `docs/workflows/game-designer-workflow.md` — detailed design process, question flows, both "surprise me" and "design every detail" paths
+- `docs/templates/game-design-doc.md` — template for `design.md` with all required sections
+- `docs/workflows/scene-design.md` — asset classification, placement strategies, composition, density targets per zone
 
-**Build phase:**
-- `docs/workflows/builder-workflow.md` — generation script structure, push workflow
-- `docs/workflows/quality-passes.md` — 5-purpose quality system
+**Build phase** — read these when generating room data:
+- `docs/workflows/builder-workflow.md` — generation script structure, push workflow, iteration
+- `docs/workflows/modular-build-workflow.md` — component architecture for large builds
+- `docs/workflows/component-template.md` — reference template for component files (basic, quest-linked, complex)
+- `docs/workflows/quality-passes.md` — 5-purpose quality system, review loop
 
-**Interactions & logic:**
-- `docs/reference/interactions.md` — complete trigger/effect syntax
-- `docs/reference/quests.md` — 3-state quest system
-- `docs/workflows/function-effects-reference.md` — NCalc expressions, variables, timers
-- `docs/workflows/game-logic-board.md` — visual circuit-board diagrams
+**Interactions & logic** — read these when adding triggers, effects, quests, or game logic:
+- `docs/reference/interactions.md` — complete trigger/effect syntax, basic interactions vs. quest-driven tasks
+- `docs/reference/quests.md` — 3-state quest system, persistence, per-player vs. shared
+- `docs/workflows/function-effects-reference.md` — NCalc expressions, variables, conditionals, timers, multiplayer functions
+- `docs/workflows/game-logic-board.md` — visual circuit-board diagrams for game logic
 
-**Item types** — read the relevant file for field schemas:
+**Item types** — read the relevant file when you need field schemas for a specific item type:
 - `docs/reference/items/building.md` — ResizableCube, WorldText, Portal, SpawnPoint
 - `docs/reference/items/models.md` — GLB, GlbCollectable, Destructible
-- `docs/reference/items/gameplay.md` — Trigger, JumpPad, 9Cube, Gun, Shotgun, CameraObject
-- `docs/reference/items/media.md` — DefaultPainting (image), DefaultVideo, PlaceableTV
+- `docs/reference/items/gameplay.md` — Trigger, JumpPad, 9Cube (elemental), Gun, Shotgun, CameraObject
+- `docs/reference/items/media.md` — DefaultPainting (image), DefaultVideo, PlaceableTV (screenshare)
 - `docs/reference/items/lighting.md` — Light, BlinkLight, SpotLight
 - `docs/reference/items/display.md` — Leaderboard, Chart, GLBSign (billboard)
 - `docs/reference/items/interactive.md` — GLBNPC (NPC with dialogue/AI)
 - `docs/reference/items/effects.md` — Addressable VFX (particles, fire, explosions, lightning)
 
-**Assets:**
-- `docs/reference/glb-asset-catalog.md` — full GLB workflow
+**Assets** — read these when working with 3D models or images:
+- `docs/reference/glb-asset-catalog.md` — full GLB workflow (upload → extract → thumbnail review → catalog → generate), plus modular kit reference
+- `docs/workflows/blender-to-portals.md` — Blender headless export pipeline
 
-**Room systems:**
-- `docs/reference/settings.md` — top-level settings schema
-- `docs/reference/room-index.md` — room index system
-- `docs/reference/parent-child.md` — item hierarchies
-- `docs/reference/movement-reference.md` — player dimensions, jump distances
+**Room systems** — read these for settings, spatial layout, or room structure:
+- `docs/reference/settings.md` — top-level settings + `roomSettingsExtraData` (JSON string) schema
+- `docs/reference/room-index.md` — room index system (3 tools: index, query, merge)
+- `docs/reference/parent-child.md` — item hierarchies using `parentItemID`, hierarchy movement/animation
+- `docs/reference/movement-reference.md` — empirical player dimensions, jump distances, default movement settings
 
-**Master index:**
-- `docs/INDEX.md` — lookup table for all 8 item categories, 21 triggers, 63+ effects, common pitfalls
+**Master index** — use when you need to look something up quickly:
+- `docs/INDEX.md` — lookup table for all 8 item categories, 21 triggers, 63+ effects, plus common pitfalls
 
 ### Python Tools (`tools/`)
+
+Run all tools via `run_command`.
 
 | Tool | When to use |
 |------|-------------|
 | `index_room.py` | Generate `room_index.md` from `snapshot.json`. Run before reading room state. |
-| `query_room.py` | Look up specific items by ID, type, or spatial location. |
+| `query_room.py` | Look up specific items by ID, type, or spatial location from `snapshot.json`. |
 | `merge_room.py` | Apply patches (add/modify/remove items, quests, settings) without full reload. |
-| `validate_room.py` | Validate `snapshot.json` before pushing. |
-| `extract_glb_metadata.py` | Extract dimensions and generate 4-view thumbnails from GLB files. |
-| `check_room_storage.py` | Report cumulative storage with OK/WARNING/CRITICAL thresholds. |
+| `validate_room.py` | Validate `snapshot.json` for structural/semantic correctness before pushing. |
+| `extract_glb_metadata.py` | Extract dimensions and generate 4-view thumbnails from GLB files. Also runs storage check. |
+| `check_room_storage.py` | Report cumulative storage with OK/WARNING/CRITICAL thresholds (200MB/500MB). |
+| `classify_modular_edges.py` | Classify modular kit piece edges (open/closed) via slab analysis. Run after extract. |
+| `merge_modular_proposal.py` | Merge approved modular kit proposal into `catalog.json`. |
+| `blender_to_portals.py` | Blender headless exporter — run via `blender --background <file> --python tools/blender_to_portals.py`. |
+| `manifest_to_room_data.py` | Convert Blender export manifest to `snapshot.json` using CDN URL mapping. |
+| `parse_cdn_upload.py` | Parse CDN upload results and save as `cdn_urls.json`. |
 
 ### Python Libraries (`lib/`)
 
 | Library | What it provides |
 |---------|-----------------|
-| `portals_core.py` | Item generators — cubes, text, spawns, triggers, GLBs, collectibles, lights, NPCs. Creators return `(item, logic)` tuples. |
-| `portals_effects.py` | 63 effect builders + 21 trigger builders. Uses `add_task_to_logic(logic, task)` to attach tasks. |
-| `portals_utils.py` | Quest helpers, rotation math, validation, data formatting. |
+| `portals_core.py` | Item generators — cubes, text, spawns, triggers, GLBs, collectibles, lights, NPCs, etc. Creators return `(item, logic)` tuples. |
+| `portals_effects.py` | 63 effect builders + 21 trigger builders. Uses `add_task_to_logic(logic, task)` to attach tasks to logic objects. |
+| `portals_utils.py` | Quest helpers, rotation math, validation, data formatting, build summaries. |
 | `modular_helpers.py` | `ModularKit` class, `rotated_edges()`, `find_piece()` for modular kit placement. |
-| `board_helpers.py` | Logic board visualization — circuit-board flowchart nodes, connectors. |
+| `board_helpers.py` | Logic board visualization — circuit-board flowchart nodes, connectors, pulses. |
 
 ### Local Project Structure
 
